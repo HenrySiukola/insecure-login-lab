@@ -1,0 +1,16 @@
+{#
+    User profile page.
+
+    Displays information derived from the insecure
+    authentication cookie.
+#}
+
+{% extends "base.html" %}
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+  <h2>Profile</h2>
+  <p><strong>User:</strong> {{ username }}</p>
+  <p><strong>Role:</strong> {{ role }}</p>
+  <a class="button-link" href="{{ url_for('auth.logout') }}">Logout</a>
+{% endblock %}

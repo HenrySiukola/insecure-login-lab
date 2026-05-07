@@ -1,0 +1,33 @@
+{#
+    User registration page.
+
+    SECURITY NOTE:
+    User input submitted through this form is intentionally
+    handled insecurely by the backend for SQL injection practice.
+#}
+
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+
+{% block content %}
+  <h2>Create account</h2>
+
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('auth.register') }}" class="form">
+    <label>Username</label>
+    <input name="username" required>
+
+    <label>Password</label>
+    <input name="password" type="password" required>
+
+    <button type="submit">Create account</button>
+  </form>
+
+  <p class="muted">
+    Already have an account?
+    <a href="{{ url_for('auth.index') }}">Log in</a>
+  </p>
+{% endblock %}

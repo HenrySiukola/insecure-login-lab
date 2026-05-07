@@ -1,0 +1,61 @@
+{#
+    Admin panel template.
+
+    Displays:
+    - all registered users
+    - role management controls
+    - account deletion controls
+
+    SECURITY NOTE:
+    Administrative actions intentionally lack CSRF protection
+    for educational purposes.
+#}
+
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+
+{% block content %}
+  <h2>Admin Panel</h2>
+
+  <h3>Users</h3>
+
+  <table class="user-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Change Role</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for user in users %}
+        <tr>
+          <td>{{ user[0] }}</td>
+          <td>{{ user[1] }}</td>
+          <td>{{ user[2] }}</td>
+          <td>
+            <form method="post" action="{{ url_for('main.change_role') }}" class="inline-form">
+              <input type="hidden" name="user_id" value="{{ user[0] }}">
+
+              <select name="role">
+                <option value="user" {% if user[2] == "user" %}selected{% endif %}>user</option>
+                <option value="admin" {% if user[2] == "admin" %}selected{% endif %}>admin</option>
+              </select>
+
+              <button type="submit">Update</button>
+            </form>
+            <form method="post"
+                  action="{{ url_for('main.delete_user') }}"
+                  class="inline-form"
+                  onsubmit="return confirm('Delete user {{ user[1] }}? This cannot be undone.');">
+              <input type="hidden" name="user_id" value="{{ user[0] }}">
+              <button type="submit" class="delete-button" title="Delete user">×</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}
