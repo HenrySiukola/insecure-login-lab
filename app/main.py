@@ -1,3 +1,15 @@
+"""
+Main routes for Insecure Login Lab.
+
+Secure branch version.
+
+This module handles:
+- profile display
+- admin user management
+- search
+- file upload, viewing, and deletion
+"""
+
 import os
 
 from flask import (
@@ -7,66 +19,77 @@ from flask import (
     render_template,
     request,
     current_app,
+    session,
+    send_from_directory,
 )
+
+from werkzeug.utils import secure_filename
 
 from .db import get_db
 
-# Main application blueprint
+
 bp = Blueprint("main", __name__)
 
+ALLOWED_EXTENSIONS = {"txt", "png", "jpg", "jpeg", "gif", "pdf"}
 
-def get_insecure_auth():
+
+def allowed_file(filename):
     """
-    Read and parse the intentionally insecure authentication cookie.
-
-    Cookie format:
-        user_id|username|role
-
-    SECURITY NOTE:
-    This implementation is intentionally vulnerable because:
-    - the cookie is fully client-controlled
-    - the cookie is not signed
-    - authorization data is trusted directly
-    - delimiter injection can manipulate parsing
+    Return True if the filename has an allowed extension.
     """
 
-    # Read custom authentication cookie
-    cookie = request.cookies.get("lab_auth")
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
 
-    if not cookie:
+
+def get_current_user():
+    """
+    Return the current authenticated user from the database.
+
+    Security fix:
+    Authorization is checked against server-side database state
+    instead of trusting client-controlled cookie values.
+    """
+
+    user_id = session.get("user_id")
+
+    if not user_id:
         return None
 
-    # Intentionally insecure parsing
-    parts = cookie.split("|")
+    db = get_db()
+    cur = db.cursor()
 
-    if len(parts) < 3:
-        return None
+    cur.execute(
+        """
+        SELECT id, username, role
+        FROM users
+        WHERE id = ?
+        """,
+        (user_id,)
+    )
 
-    return {
-        "user_id": parts[0],
-        "username": parts[1],
-        "role": parts[2],
-    }
+    return cur.fetchone()
 
 
 def require_admin():
     """
-    Verify that the current user has the admin role.
+    Return the current user if they are an admin.
 
-    SECURITY NOTE:
-    This implementation intentionally trusts the role
-    directly from the client-controlled cookie instead
-    of validating it server-side.
+    Security fix:
+    The user's role is reloaded from the database before
+    granting access to admin functionality.
     """
 
-    user = get_insecure_auth()
+    user = get_current_user()
 
     if not user:
         return None
 
-    # Intentionally insecure:
-    # trusts authorization data from the cookie
-    if user["role"] != "admin":
+    user_id, username, role = user
+
+    if role != "admin":
         return None
 
     return user
@@ -75,17 +98,12 @@ def require_admin():
 def get_user_upload_folder():
     """
     Return the current user's upload directory.
-
-    A separate folder is created for each user based on
-    their user ID.
     """
 
-    user = get_insecure_auth()
+    user = get_current_user()
 
     upload_root = current_app.config["UPLOAD_FOLDER"]
-
-    # Create per-user upload directory
-    user_folder = os.path.join(upload_root, str(user["user_id"]))
+    user_folder = os.path.join(upload_root, str(user[0]))
 
     os.makedirs(user_folder, exist_ok=True)
 
@@ -95,18 +113,20 @@ def get_user_upload_folder():
 @bp.route("/profile")
 def profile():
     """
-    Display the currently logged-in user's profile page.
+    Display the current user's profile page.
     """
 
-    user = get_insecure_auth()
+    user = get_current_user()
 
     if not user:
         return redirect(url_for("auth.index"))
 
+    user_id, username, role = user
+
     return render_template(
         "profile.html",
-        username=user["username"],
-        role=user["role"]
+        username=username,
+        role=role
     )
 
 
@@ -114,11 +134,6 @@ def profile():
 def admin():
     """
     Display the admin panel.
-
-    The admin panel allows privileged users to:
-    - view all users
-    - change user roles
-    - delete accounts
     """
 
     admin_user = require_admin()
@@ -129,7 +144,6 @@ def admin():
     db = get_db()
     cur = db.cursor()
 
-    # Retrieve all users from the database
     cur.execute(
         "SELECT id, username, role FROM users ORDER BY id"
     )
@@ -144,8 +158,8 @@ def change_role():
     """
     Change a user's role.
 
-    SECURITY NOTE:
-    This endpoint intentionally lacks CSRF protection.
+    Security fix:
+    Admin status is verified server-side before applying changes.
     """
 
     admin_user = require_admin()
@@ -156,7 +170,6 @@ def change_role():
     user_id = request.form.get("user_id")
     new_role = request.form.get("role")
 
-    # Basic validation
     if new_role not in ["user", "admin"]:
         return "Invalid role", 400
 
@@ -164,7 +177,11 @@ def change_role():
     cur = db.cursor()
 
     cur.execute(
-        "UPDATE users SET role = ? WHERE id = ?",
+        """
+        UPDATE users
+        SET role = ?
+        WHERE id = ?
+        """,
         (new_role, user_id)
     )
 
@@ -173,119 +190,13 @@ def change_role():
     return redirect(url_for("main.admin"))
 
 
-@bp.route("/search")
-def search():
-    """
-    Vulnerable search page.
-
-    SECURITY NOTE:
-    The template intentionally renders user input
-    unsafely for reflected XSS practice.
-    """
-
-    q = request.args.get("q", "")
-
-    return render_template("search.html", q=q)
-
-
-@bp.route("/uploads", methods=["GET", "POST"])
-def uploads():
-    """
-    Display and manage uploaded files.
-
-    SECURITY NOTE:
-    The upload system intentionally allows dangerous
-    file types such as HTML for stored XSS practice.
-    """
-
-    if not get_insecure_auth():
-        return redirect(url_for("auth.index"))
-
-    upload_folder = get_user_upload_folder()
-
-    # Handle file uploads
-    if request.method == "POST":
-
-        uploaded_file = request.files.get("file")
-
-        if not uploaded_file or uploaded_file.filename == "":
-            return render_template(
-                "uploads.html",
-                error="No file selected",
-                files=os.listdir(upload_folder)
-            )
-
-        # Intentionally insecure:
-        # filename is used directly without sanitization
-        save_path = os.path.join(
-            upload_folder,
-            uploaded_file.filename
-        )
-
-        uploaded_file.save(save_path)
-
-        return redirect(url_for("main.uploads"))
-
-    # Display uploaded files
-    files = os.listdir(upload_folder)
-
-    return render_template("uploads.html", files=files)
-
-
-@bp.route("/uploads/view/<path:filename>")
-def view_upload(filename):
-    """
-    Serve uploaded files back to the user.
-
-    SECURITY NOTE:
-    This implementation intentionally uses unsafe
-    file path construction for path traversal practice.
-    """
-
-    if not get_insecure_auth():
-        return redirect(url_for("auth.index"))
-
-    upload_folder = get_user_upload_folder()
-
-    # Intentionally insecure path handling
-    file_path = os.path.join(upload_folder, filename)
-
-    # Intentionally unsafe direct file access
-    with open(file_path, "rb") as f:
-        content = f.read()
-
-    return content
-
-
-@bp.route("/uploads/delete/<path:filename>", methods=["POST"])
-def delete_upload(filename):
-    """
-    Delete a single uploaded file.
-
-    SECURITY NOTE:
-    This endpoint intentionally lacks CSRF protection.
-    """
-
-    if not get_insecure_auth():
-        return redirect(url_for("auth.index"))
-
-    upload_folder = get_user_upload_folder()
-
-    file_path = os.path.join(upload_folder, filename)
-
-    if os.path.exists(file_path):
-        os.remove(file_path)
-
-    return redirect(url_for("main.uploads"))
-
-
 @bp.route("/admin/delete-user", methods=["POST"])
 def delete_user():
     """
     Delete a user account.
 
-    SECURITY NOTE:
-    This endpoint intentionally lacks CSRF protection.
+    Security fix:
+    Admin status is verified server-side before deletion.
     """
 
     admin_user = require_admin()
@@ -308,22 +219,118 @@ def delete_user():
     return redirect(url_for("main.admin"))
 
 
+@bp.route("/search")
+def search():
+    """
+    Display the search page.
+
+    Security fix:
+    Search input should be rendered escaped in the template.
+    """
+
+    q = request.args.get("q", "")
+
+    return render_template("search.html", q=q)
+
+
+@bp.route("/uploads", methods=["GET", "POST"])
+def uploads():
+    """
+    Display and manage uploaded files.
+
+    Security fixes:
+    - require authentication
+    - restrict allowed file extensions
+    - sanitize filenames
+    """
+
+    if not get_current_user():
+        return redirect(url_for("auth.index"))
+
+    upload_folder = get_user_upload_folder()
+
+    if request.method == "POST":
+        uploaded_file = request.files.get("file")
+
+        if not uploaded_file or uploaded_file.filename == "":
+            return render_template(
+                "uploads.html",
+                error="No file selected",
+                files=os.listdir(upload_folder)
+            )
+
+        if not allowed_file(uploaded_file.filename):
+            return render_template(
+                "uploads.html",
+                error="File type is not allowed.",
+                files=os.listdir(upload_folder)
+            )
+
+        filename = secure_filename(uploaded_file.filename)
+        save_path = os.path.join(upload_folder, filename)
+
+        uploaded_file.save(save_path)
+
+        return redirect(url_for("main.uploads"))
+
+    files = os.listdir(upload_folder)
+
+    return render_template("uploads.html", files=files)
+
+
+@bp.route("/uploads/view/<path:filename>")
+def view_upload(filename):
+    """
+    Serve uploaded files from the current user's upload directory.
+
+    Security fix:
+    Uses Flask's safe file-serving helper instead of directly
+    opening a user-controlled path.
+    """
+
+    if not get_current_user():
+        return redirect(url_for("auth.index"))
+
+    upload_folder = get_user_upload_folder()
+
+    return send_from_directory(upload_folder, filename)
+
+
+@bp.route("/uploads/delete/<path:filename>", methods=["POST"])
+def delete_upload(filename):
+    """
+    Delete one uploaded file belonging to the current user.
+    """
+
+    if not get_current_user():
+        return redirect(url_for("auth.index"))
+
+    upload_folder = get_user_upload_folder()
+    safe_filename = secure_filename(filename)
+
+    file_path = os.path.join(upload_folder, safe_filename)
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    return redirect(url_for("main.uploads"))
+
+
 @bp.route("/uploads/delete-all", methods=["POST"])
 def delete_all_uploads():
     """
     Delete all uploaded files belonging to the current user.
-
-    SECURITY NOTE:
-    This endpoint intentionally lacks CSRF protection.
     """
 
-    if not get_insecure_auth():
+    if not get_current_user():
         return redirect(url_for("auth.index"))
 
     folder = get_user_upload_folder()
 
-    # Delete every file in the user's upload directory
-    for f in os.listdir(folder):
-        os.remove(os.path.join(folder, f))
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+
+        if os.path.isfile(file_path):
+            os.remove(file_path)
 
     return redirect(url_for("main.uploads"))

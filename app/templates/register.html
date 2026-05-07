@@ -1,9 +1,5 @@
 {#
     User registration page.
-
-    SECURITY NOTE:
-    User input submitted through this form is intentionally
-    handled insecurely by the backend for SQL injection practice.
 #}
 
 {% extends "base.html" %}
@@ -17,6 +13,7 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('auth.register') }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Username</label>
     <input name="username" required>
 

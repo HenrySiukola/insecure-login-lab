@@ -1,19 +1,16 @@
 """
 Authentication routes for Insecure Login Lab.
 
-This module contains intentionally insecure implementations of:
-- authentication
-- session handling
-- cookie handling
-- user registration
+Secure branch version.
 
-SECURITY NOTE:
-Several vulnerabilities are intentionally included for
-educational security testing purposes.
+This module handles:
+- user registration
+- login/logout
+- password hashing
+- Flask session creation
 """
 
 from flask import (
-    make_response,
     Blueprint,
     render_template,
     request,
@@ -22,10 +19,11 @@ from flask import (
     url_for,
 )
 
+from werkzeug.security import generate_password_hash, check_password_hash
+
 from .db import get_db
 
 
-# Authentication blueprint
 bp = Blueprint("auth", __name__)
 
 
@@ -43,22 +41,17 @@ def register():
     """
     Register a new user account.
 
-    SECURITY NOTE:
-    This route intentionally contains several vulnerabilities:
-    - SQL injection
-    - plaintext password storage
-    - insufficient input validation
+    Security fixes:
+    - uses parameterized SQL queries
+    - stores password hashes instead of plaintext passwords
+    - assigns new users the default non-admin role
     """
 
-    # Display registration form
     if request.method == "GET":
         return render_template("register.html")
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
-
-    # New accounts are created with the default user role
-    role = "user"
 
     if not username or not password:
         return render_template(
@@ -66,16 +59,20 @@ def register():
             error="Username and password are required."
         )
 
+    password_hash = generate_password_hash(password)
+    role = "user"
+
     db = get_db()
     cur = db.cursor()
 
     try:
-        # Intentionally insecure SQL query construction
         cur.execute(
-            f"INSERT INTO users (username, password, role) "
-            f"VALUES ('{username}', '{password}', '{role}')"
+            """
+            INSERT INTO users (username, password, role)
+            VALUES (?, ?, ?)
+            """,
+            (username, password_hash, role)
         )
-
         db.commit()
 
     except Exception:
@@ -90,30 +87,29 @@ def register():
 @bp.route("/login", methods=["POST"])
 def login():
     """
-    Authenticate a user and create an insecure authentication cookie.
+    Authenticate a user and create a Flask session.
 
-    SECURITY NOTE:
-    This route intentionally contains:
-    - SQL injection
-    - insecure cookie handling
-    - plaintext password comparison
+    Security fixes:
+    - looks up users by username only
+    - verifies passwords using a password hash
+    - uses parameterized SQL queries
+    - does not create a custom client-controlled auth cookie
     """
 
-    username = request.form.get("username", "")
+    username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
     db = get_db()
     cur = db.cursor()
 
-    # Intentionally vulnerable SQL query
-    query = (
-        f"SELECT id, username, password, role "
-        f"FROM users "
-        f"WHERE username = '{username}' "
-        f"AND password = '{password}'"
+    cur.execute(
+        """
+        SELECT id, username, password, role
+        FROM users
+        WHERE username = ?
+        """,
+        (username,)
     )
-
-    cur.execute(query)
 
     row = cur.fetchone()
 
@@ -123,43 +119,27 @@ def login():
             error="Unknown credentials"
         )
 
-    user_id, db_username, db_password, role = row
+    user_id, db_username, stored_password_hash, role = row
 
-    # Store user information in Flask session
+    if not check_password_hash(stored_password_hash, password):
+        return render_template(
+            "login.html",
+            error="Unknown credentials"
+        )
+
+    session.clear()
     session["user_id"] = user_id
     session["username"] = db_username
-    session["role"] = role
 
-    response = make_response(
-        redirect(url_for("main.profile"))
-    )
-
-    # Intentionally insecure custom authentication cookie
-    response.set_cookie(
-        "lab_auth",
-        f"{user_id}|{db_username}|{role}",
-        httponly=False
-    )
-
-    return response
+    return redirect(url_for("main.profile"))
 
 
 @bp.route("/logout")
 def logout():
     """
-    Log out the current user.
-
-    Clears both:
-    - Flask session data
-    - custom authentication cookie
+    Log out the current user by clearing the Flask session.
     """
 
     session.clear()
 
-    response = make_response(
-        redirect(url_for("auth.index"))
-    )
-
-    response.delete_cookie("lab_auth")
-
-    return response
+    return redirect(url_for("auth.index"))

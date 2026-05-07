@@ -1,19 +1,19 @@
 """
 Database utilities for Insecure Login Lab.
 
+Secure branch version.
+
 This module manages:
 - SQLite database connections
 - database initialization
 - Flask application database lifecycle hooks
-
-SECURITY NOTE:
-The database intentionally stores plaintext passwords
-for educational purposes.
 """
 
+import os
 import sqlite3
 
 from flask import current_app, g
+from werkzeug.security import generate_password_hash
 
 
 def get_db():
@@ -52,16 +52,18 @@ def init_db():
 
     The existing users table is deleted and recreated.
 
-    SECURITY NOTE:
-    Passwords are intentionally stored in plaintext for
-    educational security testing purposes.
+    Security fix:
+    Demo passwords are stored as password hashes instead
+    of plaintext values.
     """
 
-    db = sqlite3.connect("instance/lab.db")
+    database_path = current_app.config["DATABASE"]
 
+    os.makedirs(os.path.dirname(database_path), exist_ok=True)
+
+    db = sqlite3.connect(database_path)
     cur = db.cursor()
 
-    # Reset users table
     cur.execute("DROP TABLE IF EXISTS users")
 
     cur.execute("""
@@ -73,16 +75,29 @@ def init_db():
         )
     """)
 
-    # Create intentionally insecure demo accounts
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO users (username, password, role)
-        VALUES ('admin', 'admin123', 'admin')
-    """)
+        VALUES (?, ?, ?)
+        """,
+        (
+            "admin",
+            generate_password_hash("admin123"),
+            "admin",
+        )
+    )
 
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO users (username, password, role)
-        VALUES ('alice', 'password', 'user')
-    """)
+        VALUES (?, ?, ?)
+        """,
+        (
+            "alice",
+            generate_password_hash("password"),
+            "user",
+        )
+    )
 
     db.commit()
     db.close()

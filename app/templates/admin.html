@@ -1,14 +1,7 @@
 {#
     Admin panel template.
 
-    Displays:
-    - all registered users
-    - role management controls
-    - account deletion controls
-
-    SECURITY NOTE:
-    Administrative actions intentionally lack CSRF protection
-    for educational purposes.
+    Displays registered users and admin-only management controls.
 #}
 
 {% extends "base.html" %}
@@ -25,7 +18,7 @@
         <th>ID</th>
         <th>Username</th>
         <th>Role</th>
-        <th>Change Role</th>
+        <th>Actions</th>
       </tr>
     </thead>
 
@@ -37,7 +30,7 @@
           <td>{{ user[2] }}</td>
           <td>
             <form method="post" action="{{ url_for('main.change_role') }}" class="inline-form">
-              <input type="hidden" name="user_id" value="{{ user[0] }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
               <select name="role">
                 <option value="user" {% if user[2] == "user" %}selected{% endif %}>user</option>
@@ -46,11 +39,12 @@
 
               <button type="submit">Update</button>
             </form>
+
             <form method="post"
                   action="{{ url_for('main.delete_user') }}"
                   class="inline-form"
                   onsubmit="return confirm('Delete user {{ user[1] }}? This cannot be undone.');">
-              <input type="hidden" name="user_id" value="{{ user[0] }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="delete-button" title="Delete user">×</button>
             </form>
           </td>

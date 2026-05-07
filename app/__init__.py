@@ -1,20 +1,23 @@
 """
 Application factory for Insecure Login Lab.
 
-This module creates and configures the Flask application,
-registers blueprints, sets up upload/database paths, and exposes
-the intentionally insecure current user context to templates.
+Secure branch version.
 
-SECURITY NOTE:
-Several configuration values are intentionally insecure for
-educational purposes.
+This module creates and configures the Flask application,
+registers blueprints, sets up database/upload paths, and exposes
+the current logged-in user to templates.
 """
 
 import os
 
-from flask import Flask, request
+from flask import Flask, session
+from flask_wtf.csrf import CSRFProtect
+from flask_talisman import Talisman
 
-from .db import init_app
+from .db import init_app, get_db
+
+csrf = CSRFProtect()
+talisman = Talisman()
 
 
 def create_app():
@@ -28,66 +31,80 @@ def create_app():
     app = Flask(__name__, instance_relative_config=True)
 
     app.config.from_mapping(
-        # Intentionally weak hardcoded secret for lab purposes.
-        SECRET_KEY="dev-secret",
+        # In production, load this from an environment variable.
+        SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-change-me"),
 
-        # Store the SQLite database in Flask's instance folder.
         DATABASE=os.path.join(app.instance_path, "lab.db"),
-
-        # Store uploaded files in the instance folder.
         UPLOAD_FOLDER=os.path.join(app.instance_path, "uploads"),
 
-        # Intentionally insecure cookie settings for XSS/cookie-theft practice.
-        SESSION_COOKIE_HTTPONLY=False,
-        SESSION_COOKIE_SECURE=False,
-
-        # Use browser-session cookies instead of persistent cookies.
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SECURE=False,  # Set True when running over HTTPS.
+        SESSION_COOKIE_SAMESITE="Lax",
         SESSION_PERMANENT=False,
     )
 
-    # Ensure required instance directories exist.
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
     @app.context_processor
     def inject_user():
         """
-        Make the current user available inside templates.
+        Make the current logged-in user available inside templates.
 
-        The user is parsed from the intentionally insecure `lab_auth`
-        cookie and exposed as `current_user`.
-
-        SECURITY NOTE:
-        This trusts client-controlled cookie values directly.
+        The role is reloaded from the database so templates do not rely
+        on stale or client-controlled authorization data.
         """
 
-        cookie = request.cookies.get("lab_auth")
-
-        if not cookie:
+        if "user_id" not in session:
             return {"current_user": None}
 
-        parts = cookie.split("|")
+        db = get_db()
+        cur = db.cursor()
 
-        if len(parts) < 3:
+        cur.execute(
+            """
+            SELECT id, username, role
+            FROM users
+            WHERE id = ?
+            """,
+            (session["user_id"],)
+        )
+
+        user = cur.fetchone()
+
+        if not user:
             return {"current_user": None}
+
+        user_id, username, role = user
 
         return {
             "current_user": {
-                "user_id": parts[0],
-                "username": parts[1],
-                "role": parts[2],
+                "user_id": user_id,
+                "username": username,
+                "role": role,
             }
         }
 
-    # Register database cleanup handlers.
     init_app(app)
 
-    # Register authentication routes.
     from .auth import bp as auth_bp
     app.register_blueprint(auth_bp)
 
-    # Register main application routes.
     from .main import bp as main_bp
     app.register_blueprint(main_bp)
+
+    csp = {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self'",
+        "img-src": "'self' data:",
+        "font-src": "'self'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-ancestors": "'none'",
+    }
+
+    csrf.init_app(app)
+    talisman.init_app(app, content_security_policy=csp)
 
     return app

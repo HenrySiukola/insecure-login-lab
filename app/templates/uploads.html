@@ -1,24 +1,18 @@
 {#
-    File upload laboratory page.
+    File upload page.
 
-    Users may:
-    - upload files
-    - view uploaded content
-    - delete uploaded files
-
-    SECURITY NOTE:
-    The application intentionally allows dangerous file types
-    such as HTML to demonstrate stored XSS vulnerabilities.
+    In the secure branch, uploaded filenames are sanitized and
+    file types are restricted by the backend.
 #}
 
 {% extends "base.html" %}
 {% block title %}Uploads{% endblock %}
 
 {% block content %}
-  <h2>File Upload Lab</h2>
+  <h2>File Uploads</h2>
 
   <p class="muted">
-    You can upload your own content here!
+    Upload allowed file types only.
   </p>
 
   {% if error %}
@@ -26,6 +20,7 @@
   {% endif %}
 
   <form method="post" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Choose a file</label>
     <input type="file" name="file">
     <button type="submit">Upload</button>
@@ -33,23 +28,25 @@
 
   <h3>Uploaded files</h3>
 
-{% if files %}
-  <ul class="file-list">
-    {% for file in files %}
-      <li class="file-row">
-        <a href="{{ url_for('main.view_upload', filename=file) }}" target="_blank">
-          {{ file }}
-        </a>
+  {% if files %}
+    <ul class="file-list">
+      {% for file in files %}
+        <li class="file-row">
+          <a href="{{ url_for('main.view_upload', filename=file) }}" target="_blank">
+            {{ file }}
+          </a>
 
-        <form method="post"
-              action="{{ url_for('main.delete_upload', filename=file) }}"
-              class="delete-form">
-          <button type="submit" class="delete-button" title="Delete file">×</button>
-        </form>
-      </li>
-    {% endfor %}
-  </ul>
-{% else %}
-  <p>No files uploaded yet.</p>
-{% endif %}
+          <form method="post"
+                action="{{ url_for('main.delete_upload', filename=file) }}"
+                class="delete-form"
+                onsubmit="return confirm('Delete file {{ file }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="delete-button" title="Delete file">×</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No files uploaded yet.</p>
+  {% endif %}
 {% endblock %}
