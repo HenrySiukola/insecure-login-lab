@@ -12,7 +12,7 @@ The lab contains intentionally insecure implementations of:
 - Weak session management
 - Insecure file uploads
 
-## !!!Warning!!!
+## !!! Warning !!!
 
 This application is intentionally insecure.
 
@@ -81,6 +81,15 @@ The application will be available at:
 
 ```text
 http://127.0.0.1:5000
+```
+
+There are two default users:
+```text
+Username: admin
+Passwrord: admin123
+
+Username: alice
+Password: password
 ```
 
 ## Additional Documentation
